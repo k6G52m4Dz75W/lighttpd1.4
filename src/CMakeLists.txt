@@ -332,7 +332,9 @@ macro(XCONFIG _package _link_FLAGS _cflags)
 		# -DXCONFIG_SHELL=/path/to/sh.exe
 		if(CMAKE_HOST_WIN32)
 			get_filename_component(_xconfig_ext "${XCONFIG_EXECUTABLE}" EXT)
-			if(NOT (_xconfig_ext STREQUAL ".exe" OR _xconfig_ext STREQUAL ".com"))
+			string(TOLOWER "${_xconfig_ext}" _xconfig_ext)
+			if(NOT (_xconfig_ext STREQUAL ".exe" OR _xconfig_ext STREQUAL ".com"
+					OR _xconfig_ext STREQUAL ".bat" OR _xconfig_ext STREQUAL ".cmd"))
 				if(NOT XCONFIG_SHELL)
 					# intentionally not "sh bash": the WSL launcher in System32 is
 					# bash.exe and cannot run Windows-path scripts
