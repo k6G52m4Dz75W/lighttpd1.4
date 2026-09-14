@@ -324,41 +324,48 @@ macro(XCONFIG _package _link_FLAGS _cflags)
 		#      (Git for Windows and GitHub Desktop both ship usr/bin/sh.exe);
 		# otherwise fail with a clear message instead of silently producing
 		# empty flags that break the build later.
-		# XCONFIG_SHELL is cached, so the lookup runs once even though the
-		# XCONFIG macro may run multiple times, and may be overridden with
+		# find_program() can also resolve a native ${_package}.exe, which
+		# must run directly, so only extensionless scripts get a shell
+		# prepended. XCONFIG_EXECUTABLE is reset at the top of every XCONFIG
+		# call, so the prepend runs on every call too, while XCONFIG_SHELL
+		# is cached (the lookup runs once) and may be overridden with
 		# -DXCONFIG_SHELL=/path/to/sh.exe
 		if(CMAKE_HOST_WIN32)
-			if(NOT XCONFIG_SHELL)
-				# intentionally not "sh bash": the WSL launcher in System32 is
-				# bash.exe and cannot run Windows-path scripts
-				find_program(XCONFIG_SHELL NAMES sh NO_CMAKE_FIND_ROOT_PATH)
+			get_filename_component(_xconfig_ext "${XCONFIG_EXECUTABLE}" EXT)
+			if(NOT (_xconfig_ext STREQUAL ".exe" OR _xconfig_ext STREQUAL ".com"))
 				if(NOT XCONFIG_SHELL)
-					find_program(_XCONFIG_GIT NAMES git NO_CMAKE_FIND_ROOT_PATH)
-					if(_XCONFIG_GIT)
-						get_filename_component(_git_cmd_dir "${_XCONFIG_GIT}" DIRECTORY)
-						get_filename_component(_git_root "${_git_cmd_dir}" DIRECTORY)
-						foreach(_sh IN ITEMS
-							"${_git_root}/usr/bin/sh.exe"
-							"${_git_root}/bin/sh.exe"
-							"${_git_root}/mingw64/bin/sh.exe")
-							if(EXISTS "${_sh}")
-								set(XCONFIG_SHELL "${_sh}" CACHE FILEPATH "POSIX shell used to run *-config scripts" FORCE)
-								break()
-							endif()
-						endforeach()
+					# intentionally not "sh bash": the WSL launcher in System32 is
+					# bash.exe and cannot run Windows-path scripts
+					find_program(XCONFIG_SHELL NAMES sh NO_CMAKE_FIND_ROOT_PATH)
+					if(NOT XCONFIG_SHELL)
+						find_program(_XCONFIG_GIT NAMES git NO_CMAKE_FIND_ROOT_PATH)
+						if(_XCONFIG_GIT)
+							get_filename_component(_git_cmd_dir "${_XCONFIG_GIT}" DIRECTORY)
+							get_filename_component(_git_root "${_git_cmd_dir}" DIRECTORY)
+							get_filename_component(_git_base "${_git_root}" DIRECTORY)
+							foreach(_sh IN ITEMS
+								"${_git_root}/usr/bin/sh.exe"
+								"${_git_root}/bin/sh.exe"
+								"${_git_root}/mingw64/bin/sh.exe"
+								"${_git_base}/usr/bin/sh.exe"
+								"${_git_base}/bin/sh.exe"
+								"${_git_base}/mingw64/bin/sh.exe")
+								if(EXISTS "${_sh}")
+									set(XCONFIG_SHELL "${_sh}" CACHE FILEPATH "POSIX shell used to run *-config scripts" FORCE)
+									break()
+								endif()
+							endforeach()
+						endif()
+					endif()
+					if(NOT XCONFIG_SHELL)
+						message(FATAL_ERROR
+							"Cannot run ${_package} on Windows: it is a POSIX shell script "
+							"but no shell was found. Install Git for Windows "
+							"(https://git-scm.com/) or MSYS2 and retry.")
 					endif()
 				endif()
-				if(NOT XCONFIG_SHELL)
-					message(FATAL_ERROR
-						"Cannot run ${_package} on Windows: it is a POSIX shell script "
-						"but no shell was found. Install Git for Windows "
-						"(https://git-scm.com/) or MSYS2 and retry.")
-				endif()
+				set(XCONFIG_EXECUTABLE "${XCONFIG_SHELL};${XCONFIG_EXECUTABLE}")
 			endif()
-			# XCONFIG_EXECUTABLE is reset to the bare script on every XCONFIG
-			# call, so prepend the shell on every call as well; only the shell
-			# lookup above is cached.
-			set(XCONFIG_EXECUTABLE "${XCONFIG_SHELL};${XCONFIG_EXECUTABLE}")
 		endif()
 
 		if("${_package}" STREQUAL "pcre2-config")
