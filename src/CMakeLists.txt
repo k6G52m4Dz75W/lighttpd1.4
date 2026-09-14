@@ -307,6 +307,7 @@ macro(XCONFIG _package _link_FLAGS _cflags)
 # reset the variables at the beginning
 	set(${_link_FLAGS})
 	set(${_cflags})
+	unset(XCONFIG_EXECUTABLE)
 
 	find_program(${_package}CONFIG_EXECUTABLE NAMES ${_package})
 
@@ -318,7 +319,7 @@ macro(XCONFIG _package _link_FLAGS _cflags)
 		# The *-config scripts are POSIX shell scripts. On Windows hosts they
 		# cannot be executed directly (CreateProcess does not honor shebangs),
 		# so run them through a POSIX shell when one is available:
-		#   1. a shell directly on PATH (MSYS2, WSL, ...);
+		#   1. a shell directly on PATH (MSYS2, Cygwin, ...);
 		#   2. the shell bundled with Git, derived from git.exe's location
 		#      (Git for Windows and GitHub Desktop both ship usr/bin/sh.exe);
 		# otherwise fail with a clear message instead of silently producing
@@ -328,11 +329,13 @@ macro(XCONFIG _package _link_FLAGS _cflags)
 		# -DXCONFIG_SHELL=/path/to/sh.exe
 		if(CMAKE_HOST_WIN32)
 			if(NOT XCONFIG_SHELL)
-				find_program(XCONFIG_SHELL NAMES sh bash NO_CMAKE_FIND_ROOT_PATH)
+				# intentionally not "sh bash": the WSL launcher in System32 is
+				# bash.exe and cannot run Windows-path scripts
+				find_program(XCONFIG_SHELL NAMES sh NO_CMAKE_FIND_ROOT_PATH)
 				if(NOT XCONFIG_SHELL)
-					find_program(GIT_EXECUTABLE NAMES git NO_CMAKE_FIND_ROOT_PATH)
-					if(GIT_EXECUTABLE)
-						get_filename_component(_git_cmd_dir "${GIT_EXECUTABLE}" DIRECTORY)
+					find_program(_XCONFIG_GIT NAMES git NO_CMAKE_FIND_ROOT_PATH)
+					if(_XCONFIG_GIT)
+						get_filename_component(_git_cmd_dir "${_XCONFIG_GIT}" DIRECTORY)
 						get_filename_component(_git_root "${_git_cmd_dir}" DIRECTORY)
 						foreach(_sh IN ITEMS
 							"${_git_root}/usr/bin/sh.exe"
@@ -359,13 +362,19 @@ macro(XCONFIG _package _link_FLAGS _cflags)
 		endif()
 
 		if(${_package} STREQUAL "pcre2-config")
-			execute_process(COMMAND ${XCONFIG_EXECUTABLE} --libs8 OUTPUT_VARIABLE __link_FLAGS)
+			execute_process(COMMAND ${XCONFIG_EXECUTABLE} --libs8 OUTPUT_VARIABLE __link_FLAGS RESULT_VARIABLE _xconfig_result)
 		else()
-			execute_process(COMMAND ${XCONFIG_EXECUTABLE} --libs OUTPUT_VARIABLE __link_FLAGS)
+			execute_process(COMMAND ${XCONFIG_EXECUTABLE} --libs OUTPUT_VARIABLE __link_FLAGS RESULT_VARIABLE _xconfig_result)
 		endif()
-		string(REPLACE "\n" "" "${_link_FLAGS}" "${__link_FLAGS}")
-		execute_process(COMMAND ${XCONFIG_EXECUTABLE} --cflags OUTPUT_VARIABLE __cflags)
-		string(REPLACE "\n" "" "${_cflags}" "${__cflags}")
+		if(_xconfig_result)
+			message(FATAL_ERROR "Cannot run ${XCONFIG_EXECUTABLE} --libs: ${_xconfig_result}")
+		endif()
+		string(REGEX REPLACE "[\r\n]" "" "${_link_FLAGS}" "${__link_FLAGS}")
+		execute_process(COMMAND ${XCONFIG_EXECUTABLE} --cflags OUTPUT_VARIABLE __cflags RESULT_VARIABLE _xconfig_result)
+		if(_xconfig_result)
+			message(FATAL_ERROR "Cannot run ${XCONFIG_EXECUTABLE} --cflags: ${_xconfig_result}")
+		endif()
+		string(REGEX REPLACE "[\r\n]" "" "${_cflags}" "${__cflags}")
 	else()
 		message(STATUS "found ${_package}: no")
 	endif()
