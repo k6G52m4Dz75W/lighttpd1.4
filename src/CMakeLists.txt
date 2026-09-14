@@ -323,41 +323,48 @@ macro(XCONFIG _package _link_FLAGS _cflags)
 		#      (Git for Windows and GitHub Desktop both ship usr/bin/sh.exe);
 		# otherwise fail with a clear message instead of silently producing
 		# empty flags that break the build later.
-		set(_XCONFIG_PREFIX "")
+		# XCONFIG_SHELL is cached, so the lookup runs once even though the
+		# XCONFIG macro may run multiple times, and may be overridden with
+		# -DXCONFIG_SHELL=/path/to/sh.exe
 		if(CMAKE_HOST_WIN32)
-			find_program(XCONFIG_SHELL NAMES sh bash NO_CMAKE_FIND_ROOT_PATH)
 			if(NOT XCONFIG_SHELL)
-				find_program(GIT_EXECUTABLE NAMES git NO_CMAKE_FIND_ROOT_PATH)
-				if(GIT_EXECUTABLE)
-					get_filename_component(_git_cmd_dir "${GIT_EXECUTABLE}" DIRECTORY)
-					get_filename_component(_git_root "${_git_cmd_dir}" DIRECTORY)
-					foreach(_sh IN ITEMS
-						"${_git_root}/usr/bin/sh.exe"
-						"${_git_root}/bin/sh.exe"
-						"${_git_root}/mingw64/bin/sh.exe")
-						if(EXISTS "${_sh}")
-							set(XCONFIG_SHELL "${_sh}")
-							break()
-						endif()
-					endforeach()
+				find_program(XCONFIG_SHELL NAMES sh bash NO_CMAKE_FIND_ROOT_PATH)
+				if(NOT XCONFIG_SHELL)
+					find_program(GIT_EXECUTABLE NAMES git NO_CMAKE_FIND_ROOT_PATH)
+					if(GIT_EXECUTABLE)
+						get_filename_component(_git_cmd_dir "${GIT_EXECUTABLE}" DIRECTORY)
+						get_filename_component(_git_root "${_git_cmd_dir}" DIRECTORY)
+						foreach(_sh IN ITEMS
+							"${_git_root}/usr/bin/sh.exe"
+							"${_git_root}/bin/sh.exe"
+							"${_git_root}/mingw64/bin/sh.exe")
+							if(EXISTS "${_sh}")
+								set(XCONFIG_SHELL "${_sh}" CACHE FILEPATH "POSIX shell used to run *-config scripts" FORCE)
+								break()
+							endif()
+						endforeach()
+					endif()
+				endif()
+				if(NOT XCONFIG_SHELL)
+					message(FATAL_ERROR
+						"Cannot run ${_package} on Windows: it is a POSIX shell script "
+						"but no shell was found. Install Git for Windows "
+						"(https://git-scm.com/) or MSYS2 and retry.")
 				endif()
 			endif()
-			if(NOT XCONFIG_SHELL)
-				message(FATAL_ERROR
-					"Cannot run ${_package} on Windows: it is a POSIX shell script "
-					"but no shell was found. Install Git for Windows "
-					"(https://git-scm.com/) or MSYS2 and retry.")
-			endif()
-			set(_XCONFIG_PREFIX "${XCONFIG_SHELL}")
+			# XCONFIG_EXECUTABLE is reset to the bare script on every XCONFIG
+			# call, so prepend the shell on every call as well; only the shell
+			# lookup above is cached.
+			set(XCONFIG_EXECUTABLE "${XCONFIG_SHELL};${XCONFIG_EXECUTABLE}")
 		endif()
 
 		if(${_package} STREQUAL "pcre2-config")
-			execute_process(COMMAND ${_XCONFIG_PREFIX} ${XCONFIG_EXECUTABLE} --libs8 OUTPUT_VARIABLE __link_FLAGS)
+			execute_process(COMMAND ${XCONFIG_EXECUTABLE} --libs8 OUTPUT_VARIABLE __link_FLAGS)
 		else()
-			execute_process(COMMAND ${_XCONFIG_PREFIX} ${XCONFIG_EXECUTABLE} --libs OUTPUT_VARIABLE __link_FLAGS)
+			execute_process(COMMAND ${XCONFIG_EXECUTABLE} --libs OUTPUT_VARIABLE __link_FLAGS)
 		endif()
 		string(REPLACE "\n" "" "${_link_FLAGS}" "${__link_FLAGS}")
-		execute_process(COMMAND ${_XCONFIG_PREFIX} ${XCONFIG_EXECUTABLE} --cflags OUTPUT_VARIABLE __cflags)
+		execute_process(COMMAND ${XCONFIG_EXECUTABLE} --cflags OUTPUT_VARIABLE __cflags)
 		string(REPLACE "\n" "" "${_cflags}" "${__cflags}")
 	else()
 		message(STATUS "found ${_package}: no")
