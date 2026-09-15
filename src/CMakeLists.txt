@@ -302,6 +302,14 @@ check_c_source_compiles("
 	}
 	" HAVE_STRUCT_TM_GMTOFF)
 
+# run XCONFIG_EXECUTABLE and fail loudly if the invocation fails
+macro(XCONFIG_RUN _output)
+	execute_process(COMMAND ${XCONFIG_EXECUTABLE} ${ARGN} OUTPUT_VARIABLE ${_output} RESULT_VARIABLE _xconfig_result OUTPUT_STRIP_TRAILING_WHITESPACE)
+	if(_xconfig_result)
+		message(FATAL_ERROR "Cannot run ${XCONFIG_EXECUTABLE}: ${_xconfig_result}")
+	endif()
+endmacro()
+
 ## refactor me
 macro(XCONFIG _package _link_FLAGS _cflags)
 # reset the variables at the beginning
@@ -316,27 +324,21 @@ macro(XCONFIG _package _link_FLAGS _cflags)
 		set(XCONFIG_EXECUTABLE "${${_package}CONFIG_EXECUTABLE}")
 		message(STATUS "found ${_package}: ${XCONFIG_EXECUTABLE}")
 
-		# The *-config scripts are POSIX shell scripts. On Windows hosts they
-		# cannot be executed directly (CreateProcess does not honor shebangs),
-		# so run them through a POSIX shell when one is available:
-		#   1. a shell directly on PATH (MSYS2, Cygwin, ...);
-		#   2. the shell bundled with Git, derived from git.exe's location
-		#      (Git for Windows and GitHub Desktop both ship usr/bin/sh.exe);
-		# otherwise fail with a clear message instead of silently producing
-		# empty flags that break the build later.
-		# find_program() can also resolve a native ${_package}.exe, which
-		# must run directly, so only extensionless scripts get a shell
-		# prepended. XCONFIG_EXECUTABLE is reset at the top of every XCONFIG
-		# call, so the prepend runs on every call too, while XCONFIG_SHELL
-		# is cached (the lookup runs once) and may be overridden with
+		# The *-config scripts are POSIX shell scripts, which Windows hosts
+		# cannot execute directly (CreateProcess ignores shebangs). Run them
+		# through a POSIX shell found on PATH, or the one bundled with Git
+		# for Windows / GitHub Desktop (derived from git.exe); fail with a
+		# clear message if none is present. A native ${_package}.exe found
+		# by find_program() runs directly. XCONFIG_SHELL is cached, so the
+		# lookup runs once per configure, and may be overridden with
 		# -DXCONFIG_SHELL=/path/to/sh.exe
 		if(CMAKE_HOST_WIN32)
 			get_filename_component(_xconfig_ext "${XCONFIG_EXECUTABLE}" EXT)
 			string(TOLOWER "${_xconfig_ext}" _xconfig_ext)
 			if(NOT (_xconfig_ext STREQUAL ".exe" OR _xconfig_ext STREQUAL ".com"))
 				if(NOT XCONFIG_SHELL)
-					# intentionally not "sh bash": the WSL launcher in System32 is
-					# bash.exe and cannot run Windows-path scripts
+					# not "sh bash": the bash.exe in System32 is the WSL
+					# launcher, which cannot run Windows-path scripts
 					find_program(XCONFIG_SHELL NAMES sh NO_CMAKE_FIND_ROOT_PATH)
 					if(NOT XCONFIG_SHELL)
 						find_program(_XCONFIG_GIT NAMES git NO_CMAKE_FIND_ROOT_PATH)
@@ -365,26 +367,20 @@ macro(XCONFIG _package _link_FLAGS _cflags)
 							"(https://git-scm.com/) or MSYS2 and retry.")
 					endif()
 				endif()
-				set(XCONFIG_EXECUTABLE "${XCONFIG_SHELL};${XCONFIG_EXECUTABLE}")
+				# XCONFIG_EXECUTABLE is reset on every XCONFIG call, so the
+				# shell is prepended on every call as well
+				set(XCONFIG_EXECUTABLE "${XCONFIG_SHELL}" "${XCONFIG_EXECUTABLE}")
 			endif()
 		endif()
 
 		if("${_package}" STREQUAL "pcre2-config")
-			set(_xconfig_libopt "--libs8")
+			XCONFIG_RUN(__link_FLAGS --libs8)
 		else()
-			set(_xconfig_libopt "--libs")
+			XCONFIG_RUN(__link_FLAGS --libs)
 		endif()
-		string(REPLACE ";" " " _xconfig_cmd "${XCONFIG_EXECUTABLE}")
-		execute_process(COMMAND ${XCONFIG_EXECUTABLE} ${_xconfig_libopt} OUTPUT_VARIABLE __link_FLAGS RESULT_VARIABLE _xconfig_result OUTPUT_STRIP_TRAILING_WHITESPACE)
-		if(_xconfig_result)
-			message(FATAL_ERROR "Cannot run \"${_xconfig_cmd} ${_xconfig_libopt}\": ${_xconfig_result}")
-		endif()
-		string(REGEX REPLACE "[ \t]*[\r\n]+[ \t]*" " " "${_link_FLAGS}" "${__link_FLAGS}")
-		execute_process(COMMAND ${XCONFIG_EXECUTABLE} --cflags OUTPUT_VARIABLE __cflags RESULT_VARIABLE _xconfig_result OUTPUT_STRIP_TRAILING_WHITESPACE)
-		if(_xconfig_result)
-			message(FATAL_ERROR "Cannot run \"${_xconfig_cmd} --cflags\": ${_xconfig_result}")
-		endif()
-		string(REGEX REPLACE "[ \t]*[\r\n]+[ \t]*" " " "${_cflags}" "${__cflags}")
+		string(REGEX REPLACE "[ \t\r\n]+" " " "${_link_FLAGS}" "${__link_FLAGS}")
+		XCONFIG_RUN(__cflags --cflags)
+		string(REGEX REPLACE "[ \t\r\n]+" " " "${_cflags}" "${__cflags}")
 	else()
 		message(STATUS "found ${_package}: no")
 	endif()
